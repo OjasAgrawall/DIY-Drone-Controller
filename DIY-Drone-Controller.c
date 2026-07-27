@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
+#include "hardware/adc.h"
+
 
 // SPI Defines
 #define SPI_PORT spi0
@@ -73,7 +75,7 @@ void nrf_send_data(uint8_t data[DATA_SIZE]){
 
     //load the gun
     gpio_put(PIN_CSn, 0);
-    spi_write_blocking(SPI_PORT, tx_buffer, 4); 
+    spi_write_blocking(SPI_PORT, tx_buffer, DATA_SIZE + 1);
     gpio_put(PIN_CSn, 1);
 
     //fire
@@ -86,30 +88,34 @@ void nrf_send_data(uint8_t data[DATA_SIZE]){
     uint8_t status = 0;
     int timeout = 1000; // Prevent infinite loop if hardware detaches
     while (timeout > 0) {
+
         status = nrf_read_reg(NRF_STATUS);
         if ((status & 0x30) != 0) { // Check if either MAX_RT (0x10) or TX_DS (0x20) is set
-            break;
+            timeout = 0;
         }
         sleep_us(100);
         timeout--;
     }
 
+
     if ((status & 0x10) == 0x10){
-        printf("message not sent :(");
+        printf("message not sent :(\n");
     }
     if ((status & 0x20) == 0x20){
-        printf("message send successfully :)");
+        printf("message send successfully :)\n");
     }
 
     // reset status flags and flush the transmission buffer
     nrf_write_reg(NRF_STATUS, 0x70); 
     nrf_send_cmd(FLUSH_TX);
+
 }
 
 uint8_t message[3] = {0x10, 0x20, 0x30};
 
-int main()
-{
+int main(){
+    sleep_ms(30);
+
     stdio_init_all();
 
     // SPI initialisation. This example will use SPI at 1MHz.
@@ -117,32 +123,62 @@ int main()
     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-    gpio_set_function(PIN_CSn,  GPIO_FUNC_SIO);
-    gpio_set_function(PIN_CE,   GPIO_FUNC_SIO);
-
-    // Configure SPI to 8-bit, Mode 3, MSB-first to match nRF24L01 requirements
-    spi_set_format(SPI_PORT, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
+    gpio_init(PIN_CE);
+    gpio_init(PIN_CSn);
+    gpio_set_dir(PIN_CE, GPIO_OUT);
+    gpio_set_dir(PIN_CSn, GPIO_OUT);
 
     //CE active high
-    gpio_set_dir(PIN_CE, GPIO_OUT);
     gpio_put(PIN_CE, 0);
 
     //CSn active low when sending message
-    gpio_set_dir(PIN_CSn, GPIO_OUT);
     gpio_put(PIN_CSn, 1);
 
     //init nrf
     nrf_write_reg(CONFIG, CONFIG_TX);
-    nrf_write_reg(EN_AA, 0x3F);  // Enable Auto-ACK for all pipes
+    nrf_write_reg(EN_AA, 0x3F);  // Enable Auto-ACK for all pipes each bit is one pipe
     nrf_write_reg(RX_PW_P0, DATA_SIZE);  // 3-bytes on Pipe 0 also doesnt require hex
 
     nrf_write_reg(RF_CH, CHANNEL); // confirm that this is the same as the other nrf
     nrf_write_reg(RF_SETUP, DATA_RATE); // same here as before
 
-    while (true) {
-        sleep_ms(1000);
+    //Voltage calculator
+    adc_init();
+    adc_select_input(3); // Vsys pin
 
+    const float conversion_factor = (3.28f / 1727.0f) * 3.0f;
+
+    gpio_init(PICO_DEFAULT_LED_PIN); 
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+
+    sleep_ms(2000);
+
+    uint8_t cfg = nrf_read_reg(CONFIG);
+    printf("CONFIG = 0x%02X\n", cfg);
+    
+
+    while (true) {
+
+        printf("running\n");
         nrf_send_data(message);
+
+        // uint16_t raw_value = adc_read();
+
+        // // Convert the raw value to the actual battery voltage
+        // float battery_voltage = raw_value * conversion_factor;
+
+        // // Print the result to the serial console
+        // printf("Raw ADC: %d | Battery Voltage: %.2fV\n", raw_value, battery_voltage);
+        // if (battery_voltage < 1.7 && battery_voltage > 1.6){
+        //     gpio_put(PICO_DEFAULT_LED_PIN, 1);
+        // }
+        // else{
+        //     gpio_put(PICO_DEFAULT_LED_PIN, 0);
+
+        // }
+
+        // Wait 1 second before the next reading
+        sleep_ms(1000);
 
     }
 }
