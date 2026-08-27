@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(DIY-Drone-Controller DIY-Drone-Controller.c )
+add_executable(DIY-Drone-Controller DIY-Drone-Controller.cpp )
 
 pico_set_program_name(DIY-Drone-Controller "DIY-Drone-Controller")
 pico_set_program_version(DIY-Drone-Controller "0.1")
