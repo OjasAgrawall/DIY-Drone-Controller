@@ -57,13 +57,6 @@ void nrf_send_cmd(uint8_t cmd){
     gpio_put(PIN_CSn, 1);
 }
 
-void nrf_send_cmd_data(uint8_t cmd, uint8_t data){
-    gpio_put(PIN_CSn, 0);
-    spi_write_blocking(NRF_SPI_PORT, &cmd, 1);
-    spi_write_blocking(NRF_SPI_PORT, &data, 1);
-    gpio_put(PIN_CSn, 1);
-}
-
 void nrf_write_reg(uint8_t reg, uint8_t value){
     uint8_t buffer[2] = { (W_REGISTER | reg), value};
 
@@ -204,7 +197,7 @@ int main(){
     nrf_writeAlot_reg(RX_ADDR_P0, nrf_addr, 5);
     nrf_writeAlot_reg(TX_ADDR, nrf_addr, 5);
 
-    nrf_send_cmd_data(NRF_ACTIVATE, 0x73);
+    nrf_write_reg(NRF_ACTIVATE, 0x73);
     nrf_write_reg(DYNPD, 0x01);
     nrf_write_reg(NRF_FEATURES, 0x06);
 
