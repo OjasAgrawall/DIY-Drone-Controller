@@ -6,9 +6,9 @@
 // SPI Defines
 #define NRF_SPI_PORT spi0
 #define PIN_CE   15
-#define PIN_MISO 16
+#define PIN_MISO 4
 #define PIN_CSn  17
-#define PIN_SCK  18
+#define PIN_SCK  6
 #define PIN_MOSI 19
 
 #define R_REGISTER    0x00 // useless but makes it more readable
@@ -41,6 +41,15 @@
 #define DATA_SIZE 0x03
 #define CONFIG_TX 0x02
 #define CONFIG_RX 0x03
+
+//Joysticks and push buttons
+#define CHANNEL_FB 0
+#define CHANNEL_LR 1
+#define CHANNEL_YAWLR 2
+#define PIN_UP 13
+#define PIN_DOWN 12
+
+#define PIN_SS_INPUT 22
 
 void nrf_send_cmd(uint8_t cmd){
     gpio_put(PIN_CSn, 0);
@@ -161,11 +170,9 @@ void nrf_send_data(uint8_t data[DATA_SIZE]){
 uint8_t message[3] = {0x10, 0x20, 0x30};
 
 int main(){
-    sleep_ms(30);
-
     stdio_init_all();
 
-    // SPI initialisation. This example will use SPI at 1MHz.
+        // SPI initialisation. This example will use SPI at 1MHz.
     spi_init(NRF_SPI_PORT, 1000*1000);
     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
@@ -209,18 +216,96 @@ int main(){
     printf("RF_SETUP: %02X\n", nrf_read_reg(RF_SETUP));
     printf("STATUS: %02X\n", nrf_get_status());
 
+    //Built in LED
+    gpio_init(25);
+    gpio_set_dir(25, GPIO_OUT);
+    gpio_put(25, 1);
+
+    //Slide Switch
+    gpio_init(PIN_SS_INPUT);
+    gpio_set_dir(PIN_SS_INPUT, GPIO_IN);
+    gpio_pull_up(PIN_SS_INPUT);
+
+    adc_init(); 
+
+    adc_gpio_init(26); 
+    adc_gpio_init(27); 
+    adc_gpio_init(28); 
+
+    gpio_init(PIN_UP);
+    gpio_set_dir(PIN_UP, GPIO_IN);
+    gpio_pull_up(PIN_UP);
+
+    gpio_init(PIN_DOWN);
+    gpio_set_dir(PIN_DOWN, GPIO_IN);
+    gpio_pull_up(PIN_DOWN);
 
     while (true) {
 
-        printf("running\n");
 
-        uint8_t status = nrf_get_status();
-        printf("STATUS: %02X\n", status);
+        adc_select_input(CHANNEL_FB);
+        uint16_t raw_FB = adc_read();
 
-        nrf_send_data(message);
+        adc_select_input(CHANNEL_LR);
+        uint16_t raw_LR = adc_read();
+        
+        adc_select_input(CHANNEL_YAWLR);
+        uint16_t raw_YAWLR = adc_read();
 
-        // Wait 1 second before the next reading
-        sleep_ms(1000);
+        bool up_pressed = !gpio_get(PIN_UP);
+        bool down_pressed = !gpio_get(PIN_DOWN);
+        bool running = gpio_get(PIN_SS_INPUT);
+
+        // printf("raw values:%d, %d, %d\n", raw_FB, raw_LR, raw_YAWLR);
+
+        if (running){
+            if(up_pressed){
+                printf("Up: %d\n", up_pressed);
+            }
+
+            else if(down_pressed){
+                printf("Down: %d\n", down_pressed);
+            }
+
+            if(raw_FB > 2100){
+                printf("Forward\n");
+            }
+            
+            else if(raw_FB < 1950){
+                printf("Backward\n");
+            }
+
+            if(raw_LR > 2100){
+                printf("Right\n");
+            }
+            
+            else if(raw_LR < 1950){
+                printf("Left\n");
+            }
+
+            if(raw_YAWLR > 2150){ // stickdrift ig
+                printf("Turn Right\n");
+            }
+            
+            else if(raw_YAWLR < 1950){
+                printf("Turn Left\n");
+            }
+        }
+        else{
+            printf("off\n");
+        }
+
+        sleep_ms(5); 
+
+        // printf("running\n");
+
+        // uint8_t status = nrf_get_status();
+        // printf("STATUS: %02X\n", status);
+
+        // nrf_send_data(message);
+
+        // // Wait 1 second before the next reading
+        // sleep_ms(1000);
 
     }
 }
