@@ -120,24 +120,17 @@ void nrf_send_data(uint8_t data_size, uint8_t data[]){
         tx_buffer[i + 1] = data[i];
     }
 
-    printf("FIFO_STATUS before payload = %02X\n", nrf_read_reg(FIFO_STATUS));
-
     gpio_put(PIN_CSn, 0);
     sleep_us(1);
     spi_write_blocking(NRF_SPI_PORT, tx_buffer, data_size + 1);
     gpio_put(PIN_CSn, 1);
     sleep_us(1);
 
-    printf("FIFO_STATUS after payload = %02X\n", nrf_read_reg(FIFO_STATUS));
-
     gpio_put(PIN_CE, 1);
     sleep_us(15);
     gpio_put(PIN_CE, 0);
 
     status = nrf_get_status();
-    printf("TX STATUS = %02X\n", status);
-
-    printf("After CE FIFO = %02X\n", nrf_read_reg(FIFO_STATUS));
 
     //read status flags rq
     int timeout = 100; // Prevent infinite loop if hardware detaches
@@ -150,10 +143,9 @@ void nrf_send_data(uint8_t data_size, uint8_t data[]){
         timeout--;
     }
     status = nrf_get_status();
-    printf("After timeout %02X\n", status);
 
     if ((status & 0x10) == 0x10){
-        printf("message not sent :(\n");
+        printf("ACK not received :(\n");
     }
     if ((status & 0x20) == 0x20){
         printf("message send successfully :)\n");
