@@ -26,7 +26,7 @@
 #define SETUP_AW      0x03 // xxxxxxAA | A - Address width 01 = 3 bytes, 10 = 4 bytes, 11 = 5 bytes
 #define SETUP_RETR    0x04 // AAAABBBB | Auto Retransmit Delay (A) - 0000 = 250uS delay, each increment increases by 250 uS delay | Auto Retransmit Count (B) - 0000 for 1, 1111 for 15 
 #define RF_CH         0x05 // xAAAAAAA | A - Sets the frequency to operate at
-#define RF_SETUP      0x06 // xxxABCCD | A - Force PLL lock (testing) | B - Data rate 0 = 1 Mbps 1 = 2 Mbps | C - RF output power 11 = strongest | D - Enable LNA
+#define RF_SETUP      0x06 // AxBCDEEx | A - Continous carrier transmit | B - RF data rate set to 250kbps | C - force PLL lock (testing) | D - data rate: 0 for 1mbps, 1 for 2 mbps, 0 but B=1 for 250kbps| E - RF output power
 #define NRF_STATUS    0x07 // xABCDDDE | A - Asserts when data ready in RX FIFO (W1C) | B - Asserts when data sent on TX FIFO, If ACK is EN, only asserts when ACK received (W1C) | C - Asserts when MAX_RT is reached (W1C) | D - Data Pipe number for the payload at RX FIFO | E - TX FIFO Full
 #define RX_ADDR_P0    0x0A // 39A | A - RX Address for Pipe 0 | Reset value = 0xE7E7E7E7E7
 #define TX_ADDR       0x10 // 39A | A - TX Address for Auto Ack set RX_ADDR_P0 equal to this value | Reset value = 0xE7E7E7E7E7
@@ -36,7 +36,7 @@
 #define FIFO_STATUS   0x17 // xABCxxDE | A - TX_REUSE | B - TX is Full | C - TX is empty | D - RX is full | E - RX is empty
 //other values
 #define CHANNEL 120
-#define DATA_RATE 0x26
+#define DATA_RATE 0x06
 #define DATA_SIZE 0x03
 #define CONFIG_TX 0x02
 #define CONFIG_RX 0x03
@@ -156,7 +156,45 @@ void nrf_send_data(uint8_t data_size, uint8_t data[]){
     nrf_send_cmd(FLUSH_TX);
 }
 
-uint8_t message[5] = {0x10, 0x20, 0x30, 0x40, 0x43};
+uint8_t message[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+
+uint16_t raw_FB;
+uint16_t raw_LR;
+uint16_t raw_YAWLR;
+bool running;
+bool up_pressed;
+bool down_pressed;
+
+
+uint8_t joy_fb_msb;
+uint8_t joy_fb_lsb;
+uint8_t joy_lr_msb;
+uint8_t joy_lr_lsb;
+uint8_t joy_yawlr_msb;
+uint8_t joy_yawlr_lsb;
+uint8_t b_up;
+uint8_t b_down;
+
+
+void inputs_to_nrf_data(uint16_t joy_fb, uint16_t joy_lr, uint16_t joy_yawlr, bool b_up_pressed, bool b_down_pressed, uint8_t message[8]){
+    joy_fb_msb = (joy_fb >> 8) & 0xFF;
+    joy_fb_lsb = joy_fb & 0xFF;
+
+    joy_lr_msb = (joy_lr >> 8) & 0xFF;
+    joy_lr_lsb = joy_lr & 0xFF;
+
+    joy_yawlr_msb = (joy_yawlr >> 8) & 0xFF;
+    joy_yawlr_lsb = joy_yawlr & 0xFF;
+
+    if (b_up_pressed) b_up = 0xFF; else b_up = 0x00;
+    if (b_down_pressed) b_down = 0xFF; else b_down = 0x00;
+
+    uint8_t temp[8] = {joy_fb_msb, joy_fb_lsb, joy_lr_msb, joy_lr_lsb, joy_yawlr_msb, joy_yawlr_lsb, b_up, b_down};
+
+    for (int i = 0; i < 8; i++){
+        message[i] = temp[i];
+    }
+}
 
 int main(){
     stdio_init_all();
@@ -176,15 +214,15 @@ int main(){
 
     //CSn active low when sending message
     gpio_put(PIN_CSn, 1);
-sleep_us(1);
+    sleep_us(1);
 
     //init nrf
     nrf_write_reg(CONFIG, CONFIG_TX);
     sleep_ms(2);
 
     nrf_write_reg(EN_AA, 0x01); 
-    nrf_write_reg(RF_CH, CHANNEL);
-    nrf_write_reg(RF_SETUP, DATA_RATE);
+    nrf_write_reg(RF_CH, 120);
+    nrf_write_reg(RF_SETUP, 0x20);
     // nrf_write_reg(RX_PW_P0, DATA_SIZE);
     nrf_write_reg(EN_RXADDR, 0x01);
     nrf_write_reg(SETUP_AW, 0x03);
@@ -230,70 +268,55 @@ sleep_us(1);
     gpio_set_dir(PIN_DOWN, GPIO_IN);
     gpio_pull_up(PIN_DOWN);
 
+    uint8_t loop_delay_data = 5;
+    uint8_t loop_delay_sendData = 50;
+    uint32_t current_time = to_ms_since_boot(get_absolute_time());
+    uint32_t last_time_data = 0;
+    uint32_t last_time_sendData = 0;
+
     while (true) {
-        // adc_select_input(CHANNEL_FB);
-        // uint16_t raw_FB = adc_read();
+        current_time = to_ms_since_boot(get_absolute_time());
+        if (current_time - last_time_data > loop_delay_data){
+            last_time_data = current_time;
+            adc_select_input(CHANNEL_FB);
+            raw_FB = adc_read();
 
-        // adc_select_input(CHANNEL_LR);
-        // uint16_t raw_LR = adc_read();
+            adc_select_input(CHANNEL_LR);
+            raw_LR = adc_read();
+            
+            adc_select_input(CHANNEL_YAWLR);
+            raw_YAWLR = adc_read();
+
+            up_pressed = !gpio_get(PIN_UP);
+            down_pressed = !gpio_get(PIN_DOWN);
+            running = gpio_get(PIN_SS_INPUT);
+
+            // printf("raw values:%d, %d, %d\n", raw_FB, raw_LR, raw_YAWLR);
+            inputs_to_nrf_data(raw_FB, raw_LR, raw_YAWLR, up_pressed, down_pressed, message);
+
+        }
+
+        if (current_time - last_time_sendData > loop_delay_sendData){
+            last_time_sendData = current_time;
+            if (running){
+                printf("running %d\n", sizeof(message));
+
+                uint8_t status = nrf_get_status();
+                printf("STATUS: %02X\n", status);
+
+                nrf_send_data(sizeof(message), message);
+            }
+            else{
+                printf("off!!!\n");
+
+                uint8_t status = nrf_get_status();
+                printf("STATUS: %02X\n", status);
+
+                uint8_t death[8] = {0xF7, 0xF7, 0xF7, 0xF7, 0xF7, 0xF7, 0xF7, 0xF7};
+                nrf_send_data(sizeof(death), death);
+            }
+        }
+
         
-        // adc_select_input(CHANNEL_YAWLR);
-        // uint16_t raw_YAWLR = adc_read();
-
-        // bool up_pressed = !gpio_get(PIN_UP);
-        // bool down_pressed = !gpio_get(PIN_DOWN);
-        // bool running = gpio_get(PIN_SS_INPUT);
-
-        // // printf("raw values:%d, %d, %d\n", raw_FB, raw_LR, raw_YAWLR);
-
-        // if (running){
-        //     if(up_pressed){
-        //         printf("Up: %d\n", up_pressed);
-        //     }
-
-        //     else if(down_pressed){
-        //         printf("Down: %d\n", down_pressed);
-        //     }
-
-        //     if(raw_FB > 2100){
-        //         printf("Forward\n");
-        //     }
-            
-        //     else if(raw_FB < 1950){
-        //         printf("Backward\n");
-        //     }
-
-        //     if(raw_LR > 2100){
-        //         printf("Right\n");
-        //     }
-            
-        //     else if(raw_LR < 1950){
-        //         printf("Left\n");
-        //     }
-
-        //     if(raw_YAWLR > 2150){ // stickdrift ig
-        //         printf("Turn Right\n");
-        //     }
-            
-        //     else if(raw_YAWLR < 1950){
-        //         printf("Turn Left\n");
-        //     }
-        // }
-        // else{
-        //     printf("off\n");
-        // }
-
-        // sleep_ms(5); 
-
-        printf("running %d\n", sizeof(message));
-
-        uint8_t status = nrf_get_status();
-        printf("STATUS: %02X\n", status);
-
-        nrf_send_data(sizeof(message), message);
-
-        // Wait 1 second before the next reading
-        sleep_ms(1000);
-
     }
 }
